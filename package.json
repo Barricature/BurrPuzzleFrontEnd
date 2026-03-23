@@ -1,0 +1,11 @@
+{
+  "name": "burr-puzzle-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Project manifest placeholder until tooling stack is finalized.",
+  "scripts": {
+    "dev": "echo \"TODO: start app\"",
+    "build": "echo \"TODO: build app\"",
+    "test": "echo \"TODO: run tests\""
+  }
+}
