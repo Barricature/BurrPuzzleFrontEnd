@@ -43,6 +43,7 @@ import {
   applyPlannerTransformToPiece as applyPlannerTransformToPieceImpl,
 } from "../features/planning/animationPlayer.js";
 import { createSceneBootstrap } from "../features/rendering/sceneBootstrap.js";
+import { createKeyboardInputBindings } from "../features/interaction/transform/inputBindings.js";
 
 const targetResolver = createTargetResolver({
   THREE,
@@ -681,6 +682,21 @@ function render() {
   renderStatus();
 }
 
+const keyboardBindings = createKeyboardInputBindings({
+  THREE,
+  state,
+  sceneRuntime,
+  elements,
+  findPieceByName: (pieceName) => state.pieces.find((piece) => piece.name === pieceName) ?? null,
+});
+sceneBootstrap.addFrameCallback((deltaSeconds) => {
+  if (!keyboardBindings.update(deltaSeconds)) {
+    return;
+  }
+  syncPieceObjects();
+  renderInspector();
+});
+
 registerGlobalErrorHandlersImpl({
   state,
   setStatusMessage,
@@ -695,6 +711,7 @@ bindBootstrapEvents({
     clearAllSelectionsImpl(state, setStatusMessage, statusMessage),
   render,
 });
+keyboardBindings.bind();
 renderStatus();
 loadAndRenderPuzzle().catch((error) => {
   state.loadStatus = "Failed";

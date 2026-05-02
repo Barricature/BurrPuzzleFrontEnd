@@ -54,6 +54,7 @@ Then open:
 - `src/features/interaction/selection/selectionState.js` - selection state operations extracted from MVP orchestration
 - `src/features/interaction/selection/interactionHandlers.js` - extracted pointer/click interaction handlers
 - `src/features/interaction/selection/targetResolver.js` - extracted raycast and screen-space target resolution
+- `src/features/interaction/transform/inputBindings.js` - continuous keyboard movement/rotation bindings for selected pieces
 - `src/features/matching/matchFlow.js` - extracted match action orchestration and debug output helpers
 - `src/features/planning/sceneQuery.js` - extracted collision scene query + start-block debug diagnostics
 - `src/features/planning/animationPlayer.js` - extracted planner transform application + animation playback

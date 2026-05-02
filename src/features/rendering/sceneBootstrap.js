@@ -8,6 +8,9 @@ export function createSceneBootstrap({
   onLeftClick,
   onContextMenu,
 }) {
+  const frameCallbacks = [];
+  let lastFrameTimeMs = null;
+
   function updateEdgeLineResolutions(width, height) {
     for (const object of sceneRuntime.pieceObjects.values()) {
       object.traverse((child) => {
@@ -43,9 +46,27 @@ export function createSceneBootstrap({
     sceneRuntime.renderer.render(sceneRuntime.scene, sceneRuntime.camera);
   }
 
-  function renderLoop() {
+  function renderLoop(nowMs = performance.now()) {
+    const deltaSeconds = lastFrameTimeMs === null ? 1 / 60 : Math.min((nowMs - lastFrameTimeMs) / 1000, 0.05);
+    lastFrameTimeMs = nowMs;
+    frameCallbacks.forEach((callback) => {
+      callback(deltaSeconds);
+    });
     renderThreeScene();
     window.requestAnimationFrame(renderLoop);
+  }
+
+  function addFrameCallback(callback) {
+    if (typeof callback !== "function") {
+      return () => {};
+    }
+    frameCallbacks.push(callback);
+    return () => {
+      const index = frameCallbacks.indexOf(callback);
+      if (index >= 0) {
+        frameCallbacks.splice(index, 1);
+      }
+    };
   }
 
   function ensureScene() {
@@ -101,6 +122,7 @@ export function createSceneBootstrap({
   }
 
   return {
+    addFrameCallback,
     ensureScene,
     resizeRenderer,
     renderThreeScene,

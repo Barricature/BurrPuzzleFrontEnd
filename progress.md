@@ -561,3 +561,16 @@ Current conclusion: the `target-blocked` in this trace is consistent with missin
 - Removed now-unused selection imports (`clearEdgeSelectionImpl`, `clearVertexSelectionImpl`) after wrapper pruning.
 - Result: leaner orchestration layer with unchanged runtime behavior.
 
+### Update [2026-05-02 17:51:52 -04:00] (Keyboard Controls Restore: Continuous Transform Input)
+
+- Added `src/features/interaction/transform/inputBindings.js` and implemented a continuous keyboard controller:
+  - tracks pressed keys (`W/A/S/D`, arrows, `Q/E`, `R/F`)
+  - resolves selected piece from current selection state
+  - applies frame-time-scaled translation + rotation updates
+  - ignores input while animation is running or while controls modal is open.
+- Extended `src/features/rendering/sceneBootstrap.js` with frame callback support (`addFrameCallback`) and frame delta timing in the render loop.
+- Wired keyboard update into the per-frame loop from `src/mvp/app.js`:
+  - bind key listeners during app boot
+  - on keyboard-driven state changes, sync piece objects and refresh inspector.
+- Goal of this pass: restore non-discrete, continuous keyboard controls from `docs/controls-spec.md` with minimal coupling impact.
+

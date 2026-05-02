@@ -64,4 +64,6 @@ This document tracks the migration from a single-file MVP implementation to a mo
   `src/features/rendering/sceneBootstrap.js`.
 - Selection/match interaction dependencies now mostly use direct injected lambdas instead of
   local pass-through wrappers in `src/mvp/app.js`.
+- Continuous keyboard transform bindings are now modularized in
+  `src/features/interaction/transform/inputBindings.js` and advanced via frame callbacks.
 - Behavior parity is preserved (no intentional interaction changes).
