@@ -8,7 +8,7 @@ The current runnable slice loads sample model assets with Three.js loaders, rend
 - A working MVP exists in `index.html` + `src/mvp/app.js` + `src/mvp/styles.css`.
 - Sample piece metadata is loaded from `public/sample-puzzle-manifest.js`.
 - A lightweight Node static server in `server.js` powers local development.
-- The broader TypeScript architecture under `src/app`, `src/domain`, `src/features`, `src/shared`, and `src/ui` is still mostly placeholder scaffolding.
+- Refactor in progress: foundational modules now exist under `src/app/core` and `src/app/ui`, while orchestration still lives in `src/mvp/app.js`.
 - Detailed snapshot: see `progress.md`.
 
 ## Install
@@ -47,6 +47,17 @@ Then open:
 
 - `index.html` - app shell and UI structure
 - `src/mvp/app.js` - MVP logic, state, Three.js runtime, movement/collision logic
+- `src/app/core/constants.js` - shared runtime constants extracted from MVP entrypoint
+- `src/app/core/runtime.js` - centralized app runtime/state/elements containers
+- `src/app/bootstrap/events.js` - extracted startup event wiring (global error hooks + UI control events)
+- `src/app/ui/status.js` - shared status/inspector rendering helpers
+- `src/features/interaction/selection/selectionState.js` - selection state operations extracted from MVP orchestration
+- `src/features/interaction/selection/interactionHandlers.js` - extracted pointer/click interaction handlers
+- `src/features/interaction/selection/targetResolver.js` - extracted raycast and screen-space target resolution
+- `src/features/matching/matchFlow.js` - extracted match action orchestration and debug output helpers
+- `src/features/planning/sceneQuery.js` - extracted collision scene query + start-block debug diagnostics
+- `src/features/planning/animationPlayer.js` - extracted planner transform application + animation playback
+- `src/features/rendering/sceneBootstrap.js` - extracted scene setup, resize sync, canvas event wiring, and render-loop bootstrap
 - `src/mvp/styles.css` - MVP styling
 - `public/sample-puzzle-manifest.js` - sample piece sources and initial positions
 - `server.js` - local static file server

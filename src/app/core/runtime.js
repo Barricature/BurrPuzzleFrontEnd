@@ -1,0 +1,55 @@
+import * as THREE from "https://esm.sh/three@0.181.1";
+
+export const sceneRuntime = {
+  scene: null,
+  camera: null,
+  renderer: null,
+  controls: null,
+  raycaster: new THREE.Raycaster(),
+  pointer: new THREE.Vector2(),
+  pieceObjects: new Map(),
+  collisionCaches: new Map(),
+  activeAnimationFrame: null,
+};
+
+export const state = {
+  puzzle: null,
+  pieces: [],
+  selectedPieceName: null,
+  selectedFaceTargets: [],
+  selectedEdgeTargets: [],
+  selectedVertexTargets: [],
+  matchStage: "face",
+  selectionOrderCounter: 0,
+  hoveredPieceName: null,
+  selectedTarget: null,
+  hoveredTarget: null,
+  statusMessage: "Ready",
+  loadStatus: "Pending",
+  collisionStatus: "Clear",
+  successStatus: "Incomplete",
+  isAnimating: false,
+};
+
+export const elements = {
+  puzzleTitle: document.getElementById("puzzle-title"),
+  reloadButton: document.getElementById("reload-button"),
+  pieceCount: document.getElementById("piece-count"),
+  selectedPieceName: document.getElementById("selected-piece-name"),
+  pieceList: document.getElementById("piece-list"),
+  scene: document.getElementById("scene"),
+  selectionEmpty: document.getElementById("selection-empty"),
+  selectionDetails: document.getElementById("selection-details"),
+  inspectorName: document.getElementById("inspector-name"),
+  coordOrientation: document.getElementById("coord-orientation"),
+  matchButton: document.getElementById("match-button"),
+  clearSelectionButton: document.getElementById("clear-selection-button"),
+  controlsInfoButton: document.getElementById("controls-info-button"),
+  controlsHelpModal: document.getElementById("controls-help-modal"),
+  controlsHelpBackdrop: document.getElementById("controls-help-backdrop"),
+  controlsHelpClose: document.getElementById("controls-help-close"),
+  statusMessage: document.getElementById("status-message"),
+  loadStatus: document.getElementById("load-status"),
+  collisionStatus: document.getElementById("collision-status"),
+  successStatus: document.getElementById("success-status"),
+};

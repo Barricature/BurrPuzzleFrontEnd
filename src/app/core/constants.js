@@ -1,0 +1,9 @@
+export const GRID_WIDTH = 12;
+export const GRID_HEIGHT = 8;
+export const DEFAULT_COLLISION_EPSILON = 1e-5;
+export const EDGE_BASE_LINE_WIDTH_PX = 1.5;
+export const EDGE_SELECTED_WIDTH_MULTIPLIER = 3;
+export const EDGE_HOVER_WIDTH_MULTIPLIER = 1.6;
+export const EDGE_PICK_RADIUS_MULTIPLIER = 5;
+export const VERTEX_PICK_RADIUS_MULTIPLIER = 5;
+export const VERTEX_BASE_PICK_RADIUS_PX = 7;

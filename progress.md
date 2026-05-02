@@ -424,3 +424,140 @@ Current conclusion: the `target-blocked` in this trace is consistent with missin
   - Added `syncPieceObjects(); sceneRuntime.scene?.updateMatrixWorld(true);` immediately before `computeMatchTransform(...)` in `runMatchFlow()`.
   - This guarantees world-space face/edge/vertex data is read from up-to-date transforms during match target-pose computation.
 
+### Update [2026-05-02 15:22:48 -04:00]
+
+- Started post-MVP refactor pass with behavior-preserving module extraction:
+  - Added `src/app/core/constants.js` for shared runtime constants.
+  - Added `src/app/core/runtime.js` for central `sceneRuntime`, `state`, and `elements`.
+  - Added `src/app/ui/status.js` for shared `formatErrorMessage`, `getSelectedPiece`, `renderStatus`, and `renderInspector`.
+- Updated `src/mvp/app.js` to import from new modules and route existing wrapper functions through extracted helpers.
+- Added `docs/architecture.md` to formalize migration plan and phase status.
+- Updated `README.md` to reflect current hybrid architecture (`src/mvp` orchestration + `src/app/*` extracted modules).
+- Removed obsolete placeholder file:
+  - `src/features/interaction/selection/raycastSelection.ts`.
+
+### Update [2026-05-02 15:22:48 -04:00] (Phase 2 Start)
+
+- Continued refactor into interaction domain modules:
+  - Added `src/features/interaction/selection/selectionState.js`.
+  - Moved selection-state operations out of `src/mvp/app.js`:
+    - target equality/match checks
+    - selected face/edge/vertex membership checks
+    - face/edge/vertex selection push logic (bounded queue behavior)
+    - clear/reset helpers (object/face/edge/vertex/all/disambiguation)
+    - match stage setter
+- Updated `src/mvp/app.js` to delegate these behaviors through imported feature helpers while preserving existing public function names and runtime behavior.
+- Updated `docs/architecture.md` status:
+  - Phase 2 marked `In Progress`
+  - documented extracted selection-state module and current integration state.
+
+### Update [2026-05-02 15:47:53 -04:00] (Phase 2 Continue)
+
+- Added `src/features/interaction/selection/interactionHandlers.js`.
+- Moved scene interaction handler orchestration out of `src/mvp/app.js`:
+  - pointer move hover target resolution
+  - pointer leave hover clear behavior
+  - context menu object selection flow
+  - left click face/edge/vertex stage selection flow
+- Updated `src/mvp/app.js` handler wrappers to delegate to extracted module via dependency injection while preserving behavior.
+- Updated `docs/architecture.md` current status to include handler extraction.
+
+### Update [2026-05-02 15:47:53 -04:00] (Phase 2 Continue: Target Resolver Extraction)
+
+- Added `src/features/interaction/selection/targetResolver.js`.
+- Moved pointer target-resolution helpers out of `src/mvp/app.js`:
+  - raycast hit mapping (`getTargetFromIntersection`, `findFirst*Hit`)
+  - screen-space projection and distance helpers
+  - edge/vertex screen-space proximity pickers
+  - `getTargetsFromMouseEvent(...)` aggregation
+- Updated `src/mvp/app.js` wrappers to delegate to `targetResolver` while preserving existing function names and runtime behavior.
+- Updated docs:
+  - `docs/architecture.md` now includes extracted target resolver status
+  - `README.md` layout section includes new interaction modules.
+
+### Update [2026-05-02 15:58:14 -04:00] (Phase 2 Continue: Match Flow Extraction)
+
+- Added `src/features/matching/matchFlow.js`.
+- Moved match orchestration helpers out of `src/mvp/app.js`:
+  - `buildPiecesByNameMap(...)`
+  - `outputCurrentAndTargetWorldPose(...)`
+  - `logMatchComputationChain(...)`
+  - full `runMatchFlow` decision flow via `runMatchFlowCoordinator(...)`
+- Updated `src/mvp/app.js` to delegate through wrapper functions/imported coordinator while preserving behavior and status messaging.
+- Updated docs:
+  - `docs/architecture.md` now includes extracted match flow status
+  - `README.md` layout section now includes `src/features/matching/matchFlow.js`.
+
+### Update [2026-05-02 16:03:46 -04:00] (Phase 2 Continue: Planning Scene Query Extraction)
+
+- Added `src/features/planning/sceneQuery.js`.
+- Moved planning/collision scene-query helpers out of `src/mvp/app.js`:
+  - planner transform conversion helpers
+  - touching-vs-penetrating probe helper
+  - `getCollisionSceneQuery(...)`
+  - `buildCollisionDebugTrace(...)`
+  - `diagnoseStartBlocked(...)`
+- Updated `src/mvp/app.js` to instantiate `collisionSceneTools` and delegate through wrappers, preserving existing call sites and behavior.
+- Updated docs:
+  - `docs/architecture.md` now includes extracted planning scene-query module status
+  - `README.md` layout section now includes `src/features/planning/sceneQuery.js`.
+
+### Update [2026-05-02 16:06:29 -04:00] (Phase 2 Continue: Animation Player Extraction)
+
+- Added `src/features/planning/animationPlayer.js`.
+- Moved planning animation helpers out of `src/mvp/app.js`:
+  - planner transform application (`applyPlannerTransformToPiece`)
+  - path playback interpolator (`animatePieceAlongPath`)
+- Updated `src/mvp/app.js` wrappers to delegate through extracted module with dependency injection (`THREE`, `state`, `sceneRuntime`, render/status callbacks).
+- Updated docs:
+  - `docs/architecture.md` now includes extracted animation player module status
+  - `README.md` layout section now includes `src/features/planning/animationPlayer.js`.
+
+### Update [2026-05-02 16:08:32 -04:00] (Phase 2 Cleanup: Dead Wrapper Removal)
+
+- Removed now-redundant dead wrappers from `src/mvp/app.js` after module extraction:
+  - legacy target-resolver passthrough wrappers (`findFirst*`, `projectWorldPointToScreen`, etc.)
+  - legacy scene-query passthrough wrappers no longer referenced
+  - unused `getPieceWorldTransform(...)` helper.
+- Kept only wrappers still required by dependency-injected orchestrators.
+- Result: smaller MVP orchestrator surface with no behavior changes.
+
+### Update [2026-05-02 17:23:03 -04:00] (Phase 4 Cleanup: Inline Single-Use Match Wrappers)
+
+- Reduced `src/mvp/app.js` wrapper surface further by inlining single-use dependencies directly into `runMatchFlow()` coordinator injection:
+  - pieces map builder, match debug logger, pose output
+  - collision scene query and start-block diagnostics
+  - animation orchestration callback + planner-transform apply callback
+- Removed additional unused helper wrappers that no longer had call sites (`getSelectedPiece`, `clearHoverHighlight`).
+- Preserved runtime behavior by keeping the same dependency values and execution order, only changing wiring shape.
+
+### Update [2026-05-02 17:25:10 -04:00] (Phase 4 Cleanup: Bootstrap Event Extraction)
+
+- Added `src/app/bootstrap/events.js` to hold app startup event wiring helpers:
+  - `registerGlobalErrorHandlers(...)`
+  - `bindBootstrapEvents(...)`
+- Moved global error listeners and controls/reload/match/clear-selection event binding out of `src/mvp/app.js`.
+- Updated `src/mvp/app.js` to call extracted bootstrap helpers while preserving startup order:
+  - register handlers
+  - bind events
+  - render status
+  - begin async load.
+
+### Update [2026-05-02 17:29:18 -04:00] (Phase 4 Cleanup: Scene Bootstrap Extraction)
+
+- Added `src/features/rendering/sceneBootstrap.js` with `createSceneBootstrap(...)` to encapsulate:
+  - scene/camera/renderer/control creation
+  - edge line resolution sync on resize
+  - scene render call and render-loop startup
+  - pointer/click/context menu event attachment on renderer canvas.
+- Removed in-file scene boot/render helper functions from `src/mvp/app.js` (`ensureScene`, `resizeRenderer`, `updateEdgeLineResolutions`, `renderThreeScene`, `renderLoop`).
+- Rewired `src/mvp/app.js` to use `sceneBootstrap.ensureScene()`, `sceneBootstrap.resizeRenderer()`, and `sceneBootstrap.renderThreeScene()` at existing call sites.
+- Preserved behavior: same scene appearance, controls setup, event handlers, and render-loop semantics.
+
+### Update [2026-05-02 17:32:19 -04:00] (Phase 4 Closeout: Selection Wrapper Prune)
+
+- Removed another set of low-value selection/state passthrough wrappers from `src/mvp/app.js` by wiring state-aware lambdas directly into interaction and match coordinators.
+- Updated selection highlight checks in `syncPieceObjects()` to call selection-state implementations directly (`isTargetMatchImpl`, `is*TargetSelectedImpl`) instead of local pass-throughs.
+- Removed now-unused selection imports (`clearEdgeSelectionImpl`, `clearVertexSelectionImpl`) after wrapper pruning.
+- Result: leaner orchestration layer with unchanged runtime behavior.
+
