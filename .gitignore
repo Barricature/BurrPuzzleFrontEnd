@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build outputs and caches
+dist/
+build/
+.cache/
+coverage/
+
+# Runtime logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment and local overrides
+.env
+.env.*
+!.env.example
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local debug artifacts
+Debug.txt
+
+# Large local sample geometry (do not commit by default)
+public/samples/6p_burr/*.stl
+public/sample/files/*.stl

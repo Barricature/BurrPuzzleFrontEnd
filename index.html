@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Burr Puzzle Frontend MVP</title>
+    <link rel="stylesheet" href="./src/mvp/styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://esm.sh/three@0.181.1"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="top-bar">
+        <div>
+          <p class="eyebrow">Burr Puzzle Frontend</p>
+          <h1 id="puzzle-title">Loading sample assets...</h1>
+        </div>
+        <button id="reload-button" class="primary-button" type="button">Reload Sample Assets</button>
+      </header>
+
+      <main class="workspace">
+        <aside class="panel left-panel">
+          <div class="panel-header">
+            <p class="eyebrow">Pieces</p>
+            <h2>Puzzle Overview</h2>
+          </div>
+          <dl class="summary-list">
+            <div>
+              <dt>Piece count</dt>
+              <dd id="piece-count">0</dd>
+            </div>
+            <div>
+              <dt>Selected piece</dt>
+              <dd id="selected-piece-name">None</dd>
+            </div>
+          </dl>
+          <div id="piece-list" class="piece-list" aria-label="Puzzle pieces"></div>
+        </aside>
+
+        <section class="viewport-panel">
+          <div class="panel-header">
+            <p class="eyebrow">Viewport</p>
+            <h2>Sample Workspace</h2>
+          </div>
+          <div class="scene-card">
+            <div id="scene" class="scene" aria-label="Puzzle viewport"></div>
+          </div>
+        </section>
+
+        <aside class="panel right-panel">
+          <div class="panel-header">
+            <p class="eyebrow">Controls</p>
+            <h2>Transform Panel</h2>
+          </div>
+
+          <div class="control-group">
+            <p class="inspector-label">Match Action</p>
+            <button id="match-button" type="button">Match</button>
+            <button id="clear-selection-button" type="button">Clear Selection</button>
+          </div>
+
+          <div class="control-group">
+            <div class="info-row">
+              <p class="inspector-label">Information</p>
+              <button
+                id="controls-info-button"
+                class="icon-button"
+                type="button"
+                aria-expanded="false"
+                aria-controls="controls-help-modal"
+              >
+                i
+              </button>
+            </div>
+          </div>
+
+          <div id="selection-empty" class="empty-state">
+            Select a block from the list to inspect it.
+          </div>
+
+          <div id="selection-details" class="selection-details hidden">
+            <div class="inspector-card">
+              <p class="inspector-label">Current piece</p>
+              <h3 id="inspector-name">None</h3>
+              <dl class="coordinate-list">
+                <div>
+                  <dt>Orientation</dt>
+                  <dd id="coord-orientation">0deg</dd>
+                </div>
+              </dl>
+            </div>
+
+          </div>
+        </aside>
+      </main>
+
+      <div id="controls-help-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="controls-help-title">
+        <div id="controls-help-backdrop" class="modal-backdrop"></div>
+        <div class="modal-panel">
+          <div class="modal-header">
+            <h3 id="controls-help-title">Controls</h3>
+            <button id="controls-help-close" class="icon-button" type="button" aria-label="Close controls help">x</button>
+          </div>
+          <div class="controls-help">
+            <div class="control-row">
+              <div class="key-group">
+                <span class="keycap">W</span>
+                <span class="keycap">A</span>
+                <span class="keycap">S</span>
+                <span class="keycap">D</span>
+              </div>
+              <p class="control-note">Translate selected piece in screen-parallel directions</p>
+            </div>
+            <div class="control-row">
+              <div class="key-group">
+                <span class="keycap">W</span>
+                <span class="keycap">S</span>
+              </div>
+              <p class="control-note">Move farther / nearer along screen depth</p>
+            </div>
+            <div class="control-row">
+              <div class="key-group">
+                <span class="keycap">Q</span>
+                <span class="keycap">E</span>
+              </div>
+              <p class="control-note">Rotate around axis parallel to the screen</p>
+            </div>
+            <div class="control-row">
+              <div class="key-group">
+                <span class="keycap">←</span>
+                <span class="keycap">→</span>
+              </div>
+              <p class="control-note">Rotate around axis parallel to the ground</p>
+            </div>
+            <div class="control-row">
+              <div class="key-group">
+                <span class="keycap">R</span>
+                <span class="keycap">F</span>
+              </div>
+              <p class="control-note">Rotate around axis orthogonal to ground and screen</p>
+            </div>
+            <div class="control-row">
+              <div class="key-group">
+                <span class="keycap">Left Click</span>
+              </div>
+              <p class="control-note">Select a face</p>
+            </div>
+            <div class="control-row">
+              <div class="key-group">
+                <span class="keycap">Right Click</span>
+              </div>
+              <p class="control-note">Select an object</p>
+            </div>
+            <div class="control-row">
+              <div class="key-group">
+                <span class="keycap">Ctrl</span>
+                <span class="keycap">+</span>
+                <span class="keycap">Left Click</span>
+                <span class="keycap">+</span>
+                <span class="keycap">Drag</span>
+              </div>
+              <p class="control-note">Orbit / drag full scene view</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="status-bar">
+        <div class="status-message">
+          <span class="status-label">Status</span>
+          <strong id="status-message">Ready</strong>
+        </div>
+        <div class="status-pill-group">
+          <span id="load-status" class="status-pill">Load: Pending</span>
+          <span id="collision-status" class="status-pill">Collision: Clear</span>
+          <span id="success-status" class="status-pill">Success: Incomplete</span>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="./src/mvp/app.js"></script>
+  </body>
+</html>

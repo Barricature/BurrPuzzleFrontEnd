@@ -2,10 +2,14 @@
   "name": "burr-puzzle-frontend",
   "private": true,
   "version": "0.1.0",
-  "description": "Project manifest placeholder until tooling stack is finalized.",
+  "description": "Minimal viable static workspace for a burr puzzle frontend.",
   "scripts": {
-    "dev": "echo \"TODO: start app\"",
-    "build": "echo \"TODO: build app\"",
-    "test": "echo \"TODO: run tests\""
+    "dev": "\"%npm_node_execpath%\" server.js",
+    "build": "\"%npm_node_execpath%\" scripts/noop-build.js",
+    "test": "\"%npm_node_execpath%\" --test"
+  },
+  "dependencies": {
+    "three": "^0.184.0",
+    "three-mesh-bvh": "^0.9.9"
   }
 }
