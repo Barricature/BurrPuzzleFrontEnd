@@ -1,3 +1,456 @@
+## Update [2026-05-07]: Start-Tree Rotation Alignment Seed + Seed Diagnostics
+
+- Symptom (from a `[Match Report]` after the previous strict-no-penetration
+  change): CBiRRT exhausted its 2000 iteration budget with 6078 tree nodes
+  and `bestAttempt.position = (15.69, 0.19, -4.73)` (very close to the
+  matched target position `16.518, 0, -4`) but the bestAttempt rotation
+  was `~47 degrees` away from the target rotation. The start tree had
+  reached the target *position* neighbourhood but was wandering in
+  rotation space and could not match the target orientation needed to
+  connect with the goal tree.
+- Root cause: with the disassembly seeds added on the goal tree only, the
+  goal tree had several nodes at target rotation in free space but the
+  start tree was rooted at identity rotation. Each `constrainedExtend`
+  step interpolates translation+rotation jointly, so the start tree
+  rotated incrementally toward random samples while it translated --
+  intermediate poses had a partially-rotated bbox that frequently
+  collided with neighbouring pieces. Effective search dimensionality was
+  the full 6-DOF.
+- Fix: added a dual seed on the start side in
+  `src/features/physics/path-finding/cbirrt/planCBiRRT.ts`:
+  - Build a "rotation alignment" pose at `(start.position, target.rotation)`.
+  - Validate the rotate-in-place segment from `start` to that pose using
+    `isSegmentCollisionFree(...)` -- the start position is typically far
+    from any obstacle, so the rotation is almost always free.
+  - When the segment is clear, attach the new pose as a direct child of
+    the start root in `treeA`.
+  - Skip the seed when start is already at target rotation
+    (`transformDistance` below `connectionEpsilon`).
+- Effect: extensions originating from the rotation-alignment node maintain
+  the target rotation by construction (slerp between target rotation and a
+  goal-tree node at target rotation stays at target rotation). The 6-DOF
+  search collapses to a 3-DOF translation search through obstacle-free
+  space, which RRT solves much faster.
+- Added a `seedAcceptance` block to the planner stats for visibility:
+  - `goalCandidates`, `goalAccepted`, `goalRejectedPenetrating`,
+    `goalRejectedSegmentBlocked` for the disassembly seeds
+  - `startRotationAlignmentAttempted`, `startRotationAlignmentAccepted`,
+    `startRotationAlignmentReason` for the new alignment seed
+  - These show up automatically in the consolidated `[Match Report]` under
+    `planner.cbirrtFallback.stats.seedAcceptance` so failures (e.g. a seed
+    that was rejected because the segment to/from it is blocked) are
+    immediately visible without re-running.
+- Bumped CBiRRT defaults to give the seeded planner room to finish:
+  - `maxIterations`: `2000 -> 4000`
+  - `maxPlanningTimeMs`: `1000 -> 2500`
+  - `goalSampleProbability`: `0.10 -> 0.15` (slightly higher bias toward
+    sampling existing goal-tree nodes, which are now mostly
+    target-rotation poses thanks to the disassembly seeds)
+- Combined with the previous "strict no-penetration + disassembly seeds"
+  change, CBiRRT now has both: (a) target-rotation entry points in free
+  space (goal tree) and (b) a target-rotation departure point at the
+  start position (start tree). The remaining work for RRT is a 3-DOF
+  translation search to bridge them, which is the natural shape of burr
+  disassembly motion.
+
+## Update [2026-05-07]: Strict No-Penetration + Disassembly-Axis Hints For CBiRRT
+
+- Goal: never let any piece visually penetrate any other piece during a
+  Match animation, including the matched fixed piece. Previously the match
+  flow filtered the matched fixed piece out of the obstacle list because
+  the old nudge-probe heuristic mis-classified face-flush contact as
+  `penetrating`; the side effect was that any straight-line approach the
+  planner picked would phase straight through the fixed piece during
+  animation.
+- Now that `classifyTriangleContact(...)` correctly classifies face-flush,
+  edge-on-face, and vertex contacts as `touching`, the filter is no longer
+  necessary and has been removed:
+  - `runMatchFlowCoordinator` in `src/features/matching/matchFlow.js` now
+    leaves `expectedContactObjectIds = []` always; both planners and the
+    per-tick animation guard receive the unfiltered scene query.
+  - The matched target pose still passes the planner's `target` collision
+    check because the new classifier sees the matched-face triangle pairs
+    as `touching`, not `penetrating`.
+  - Any candidate path that would actually phase-through the fixed piece
+    is now rejected, so the animation never lands on a penetrating frame.
+- Side effect: Block Adhere's "stage along `+attachmentNormalWorld`,
+  approach along `-n`" template does not match burr-style disassembly
+  (where the only valid disassembly direction is the moving piece's long
+  axis at target, perpendicular to the matched face normal). Block Adhere
+  will now report `staging-blocked` / `approach-blocked` for these cases
+  and fall through to the CBiRRT planner.
+- Added disassembly-axis hints for CBiRRT in
+  `src/features/matching/matchFlow.js`:
+  - `getLocalLongAxisAndSize(piece)` reads `piece.size`
+    (`{ width, depth, height }`, the world-space load-time bbox at
+    identity rotation) to identify the moving piece's longest local axis.
+  - `rotateVecByQuat(...)` (inlined to avoid pulling THREE into this
+    module) rotates that local axis by the target rotation to get the
+    disassembly axis in world space.
+  - `computeDisassemblySeeds({ movingPiece, targetTransform })` builds two
+    pre-assembly poses at `targetTransform.position +/- 2 * worldLongSize *
+    disassemblyAxisWorld`, both at target rotation. They sit in free
+    space well beyond the matched fixed piece in either direction along
+    the slide axis.
+  - These seeds are passed alongside Block Adhere's `bestAttempt` (when
+    present) to `planCBiRRT(...)` as the `seedTransforms` argument.
+- Updated CBiRRT seed handling in
+  `src/features/physics/path-finding/cbirrt/planCBiRRT.ts`:
+  - The goal tree is now initialized with target only as the root;
+    user-supplied seeds are added as direct children of the target node,
+    but only after their seed-to-target segment passes
+    `isSegmentCollisionFree(...)`. This guarantees:
+    - any returned path ends at the matched target pose (because tree-B
+      path reconstruction traces parents back to the single target root),
+      not at one of the seeds; and
+    - the seed-to-target portion of the path is collision-free by
+      construction, so the slide-in is animated with face-flush contact
+      throughout (correctly classified as `touching`).
+  - Penetrating seeds are silently dropped, as before.
+- Updated `deriveSamplingBounds(...)` in
+  `src/features/physics/path-finding/cbirrt/sampler.ts` to take an optional
+  `extraTransforms` array. The CBiRRT bounds now include start, target,
+  AND all candidate seed positions, so the sampling AABB extends to cover
+  the disassembly seeds and CBiRRT can sample reachable random poses
+  between start and the seeds.
+- Net behavior:
+  - Simple translation-only matches (e.g. peg-into-hole that aligns with
+    the face normal): Block Adhere succeeds as before, animation strictly
+    avoids all pieces.
+  - Burr-style interlock matches: Block Adhere fails, CBiRRT picks up.
+    The disassembly seeds give the planner a free-space "entry corridor"
+    that connects via the validated slide-to-target segment, so the
+    typical case finds a path that approaches the assembled position by
+    sliding along the moving piece's long axis instead of phasing through
+    the fixed piece.
+- Match Report fields unchanged structurally; the `planner.expectedContactObjectIds`
+  array will now always be empty, which acts as a self-documenting marker
+  that the run used strict semantics.
+
+## Update [2026-05-07]: Per-Axis Slide Decomposition For Keyboard Control
+
+- Symptom: after a successful Match, the moving piece is interlocked with
+  the fixed piece (e.g. Piece 2 inside Piece 4's notch). Pulling it back out
+  by keyboard input was reported as "blocked by Piece 4" in every direction
+  the user pressed.
+- Root cause: `inputBindings.update(...)` applied the full screen-aligned
+  motion vector atomically, then ran one collision check. Burr interlocks
+  have exactly one valid disassembly axis (the moving piece's long axis at
+  the assembled pose); any motion with a non-zero perpendicular component
+  trips the collision guard and gets the whole frame reverted. Combined
+  with the screen-axis WASD/arrow mapping, almost every key produced a
+  motion with a forbidden component, so all keys looked blocked even when
+  the user's intent contained the valid axis.
+- Fix: refactored the translation step in
+  `src/features/interaction/transform/inputBindings.js` to apply each world
+  axis component independently:
+  - the screen-aligned `moveVector` is computed as before, but its
+    `(x, y, z)` components are split into three separate single-axis
+    deltas
+  - each axis delta is applied to the piece, then the collision guard is
+    consulted; if the resulting pose penetrates a non-allowed obstacle,
+    that field is restored and the loop continues with the next axis
+  - successful components stick, blocked components are silently dropped
+  - this is the standard "slide along walls" behavior used in games:
+    pressing W (which projects to e.g. world `+Y -Z` after camera
+    transform) lets the `-Z` component slide the piece along its long
+    axis even when the `+Y` component is interlock-blocked
+- Rotation is still applied atomically (composed quaternions do not commute
+  so per-axis decomposition is meaningless); on collision only the rotation
+  is reverted, preserving any translation that succeeded earlier in the
+  frame.
+- `lastBlock` semantics updated: the collision pill now lights up red
+  ("Blocked by ...") only when the user pressed at least one key but
+  nothing was applied this frame. Partial slides (one axis succeeded,
+  others got rejected) are reported as `Clear` so the UI does not falsely
+  indicate "stuck" while the piece is actually moving.
+- Cost: up to four `classifyObjectAtTransform` calls per frame (three
+  translation axes plus one rotation) when every key is held. Each call is
+  the new bvhcast-based classifier from earlier today, so this stays well
+  under the 60 fps budget for the 6-piece puzzle.
+- Outcome for the reported case: pressing any key whose screen-projected
+  vector contains the world long-axis component (typically W/S or
+  ArrowUp/ArrowDown depending on camera angle) will now slide the matched
+  piece out of the interlock; perpendicular axis components remain blocked
+  but no longer veto the whole motion.
+
+## Update [2026-05-07]: Geometric Tangent-Face Detector (Replaces Nudge Probe)
+
+- Goal: classify any tangent-face contact between two pieces as `touching`,
+  not `penetrating`, regardless of whether the surrounding geometry is
+  interlocked. The previous `isLikelyTouchingContact` heuristic fired six
+  axis-aligned BVH probes at `1e-4` displacement; for burr-style interlocks
+  no axis-aligned nudge can resolve the intersection, so face-flush contact
+  was always misclassified as `penetrating`.
+- Added `classifyTriangleContact(...)` in
+  `src/features/planning/sceneQuery.js`. It iterates every pair of
+  AABB-overlapping triangles between the two BVHs via
+  `MeshBVH.bvhcast(...)`, confirms each pair with
+  `ExtendedTriangle.intersectsTriangle(other, target)`, then classifies
+  every confirmed intersection as either:
+  - **coplanar tangential** (face-flush): `|n_obstacle · n_moving| > 1 - eps`
+    AND distance from one triangle's vertex to the other's plane below
+    `planarityEpsilon`
+  - **boundary tangential** (edge-on-edge / edge-on-face / vertex contact):
+    the intersection segment lies entirely within `planarityEpsilon` of one
+    of the three edges of either triangle
+  - **interior penetration**: anything else (the line of intersection cuts
+    through the interior of both triangles)
+- Aggregation:
+  - any pair classified as interior penetration => the contact is
+    `penetrating` (early exit from `bvhcast` to keep this case cheap)
+  - else if any pair was tangential => `touching`
+  - else => `separated`
+- Wired the new classifier into both call sites in `sceneQuery.js`:
+  - `classifyObjectAtTransform(...)`: replaces the old
+    "intersectsGeometry + nudge probe" sequence with a single bvhcast walk.
+    `planarityEpsilon` derives from `input.collisionEpsilon * 100` (or
+    `1e-4` floor), giving roughly a 0.1mm tolerance at the project's
+    typical scale, which comfortably absorbs `Matrix4.compose / decompose`
+    drift while staying well below any plausible real-penetration depth.
+  - `buildCollisionDebugTrace(...)`: same change; the trace now reports
+    `narrowphaseIntersects = (status !== "separated")` and
+    `contactStatus = status` straight from the new classifier.
+- Exposed `classifyTriangleContact` from `createCollisionSceneTools(...)`
+  so debugging code (e.g. future Match Reports or interactive probes) can
+  call it directly.
+- Effects of this change:
+  - Keyboard: pieces can now slide against each other at face-flush, edges,
+    and corners without the collision guard rejecting the move. Real 3D
+    overlap (one piece poking into another's body interior) still bounces
+    back and lights up the red collision pill.
+  - Match animation: the per-tick collision guard is no longer fooled by
+    burr interlock at the assembled position. Combined with the existing
+    `expectedContactObjectIds` filter, both the planner and the animation
+    accept face-flush + interlock contact as path-valid.
+  - Block Adhere planner: the previous `target-blocked` failure on the
+    Piece 2 -> Piece 4 match should now resolve to `separated` (the new
+    coplanar test passes for the matched faces) and the planner can
+    proceed.
+- Cost notes:
+  - `bvhcast` walks the same node hierarchy as `intersectsGeometry`. For
+    the no-overlap case, BVH bbox pruning makes both equally cheap.
+  - For the contact case, the new walk processes every overlapping
+    triangle pair (vs. the bool short-circuit of `intersectsGeometry`),
+    but it replaces the old 6-query nudge probe entirely, so net cost is
+    similar or lower for typical contact scenarios.
+- The old `isLikelyTouchingContact` is still exported (for backwards
+  compatibility and as a debugging fallback) but is no longer on any hot
+  path.
+
+## Update [2026-05-07]: Constant Collision Guard For Keyboard And Animation
+
+- Goal: strictly avoid penetration both during keyboard transform input and
+  Match animation playback. If a candidate frame would penetrate any
+  non-allowed obstacle, revert to the previous frame's pose.
+- Promoted the previously-local `createMatchSceneQuery(...)` helper into
+  `src/features/planning/sceneQuery.js` as `createSceneQueryWithExpectedContacts(...)`
+  so both the match flow and the new collision guard can share one
+  implementation. `matchFlow.js` now imports it instead of redefining it.
+- Added a `collisionGuard` object in `src/mvp/app.js` exposing
+  `isPiecePenetrating(piece, options)`. It rebuilds the scene query each call
+  (so obstacle snapshots reflect the current piece state), optionally wraps
+  it with `createSceneQueryWithExpectedContacts` when
+  `options.expectedContactObjectIds` is non-empty, and returns
+  `{ blocked, obstacleObjectId, status }` based on
+  `classifyObjectAtTransform(...)`.
+- Keyboard control (`src/features/interaction/transform/inputBindings.js`):
+  - `createKeyboardInputBindings(...)` now accepts a `collisionGuard`.
+  - At the start of each `update(deltaSeconds)`, the piece's pose is
+    snapshotted (`position`, `rotationQuaternion`, `orientation`).
+  - After translation + rotation are applied, the guard is consulted; if it
+    reports `blocked`, the snapshot is restored atomically and the frame is
+    treated as a no-op.
+  - Exposes `getLastBlock()` so the caller can mirror the latest guard
+    result into the UI without re-running the check.
+- Animation (`src/features/planning/animationPlayer.js`):
+  - `animatePieceAlongPath(...)` now accepts `collisionGuard`,
+    `expectedContactObjectIds`, and `findPieceByName`.
+  - Each tick snapshots the moving piece state, applies the interpolated
+    transform, then runs the guard with the supplied
+    `expectedContactObjectIds` (the matched fixed piece is included so
+    burr-style face-flush contact at the assembled position remains
+    path-valid).
+  - On a blocked frame the animation is reverted to the snapshot, marked
+    not-animating, the active rAF cancelled, and the status bar reports
+    `Animation aborted: collision with <piece>` (or generic when the
+    obstacle id is missing).
+  - The final-pose check is also gated through the guard so the animation
+    never lands on a frame that would otherwise be classified as
+    penetrating.
+- Match flow (`src/features/matching/matchFlow.js`) now passes
+  `{ expectedContactObjectIds }` to the animation callback so the same
+  filter the planner used carries over to the animation guard.
+- Wired in `src/mvp/app.js`:
+  - keyboard bindings receive `collisionGuard`
+  - the per-frame callback also reads `keyboardBindings.getLastBlock()` and
+    updates `state.collisionStatus` to `Clear` or
+    `Blocked by <piece>` accordingly, calling `renderStatus()` only on
+    transitions
+  - the animation callback factory threads `collisionGuard`,
+    `expectedContactObjectIds`, and `findPieceByName` to
+    `animatePieceAlongPath`
+- UI (`src/app/ui/status.js`): the collision pill now renders with the red
+  `is-warning` class whenever `state.collisionStatus !== "Clear"`, and green
+  `is-success` otherwise. No CSS changes needed (`.status-pill.is-warning`
+  was already defined in `src/mvp/styles.css`).
+- Performance notes:
+  - One scene query rebuild + one `classifyObjectAtTransform` call per
+    keyboard frame and per animation tick. For the 6-piece puzzle at
+    `scale=0.05`, this is sub-millisecond on average.
+  - The touching-vs-penetrating probe (six BVH nudge queries when
+    narrowphase reports overlap) is the only meaningful cost spike; it only
+    runs on actual overlap, so the common "moving in free space" case stays
+    cheap.
+
+## Update [2026-05-07]: Treat Matched Fixed Piece As Allowed Contact
+
+- Symptom: Match flow reported `target-blocked by Piece 4` on a visually
+  feasible face-flush match. The trace
+  (`diagnostics.targetBlocked.obstacleTraces`) showed all other pieces as
+  `separated`; only the matched fixed piece (`Piece 4`) classified as
+  `penetrating`. Both pieces' world AABBs at the target had identical
+  X-extent `[15.893, 17.143]` — i.e. they interlock through complementary
+  notches at the matched faces.
+- Root cause: `classifyObjectAtTransform(...)` uses BVH narrowphase plus a
+  micro-separation probe (`isLikelyTouchingContact`) to distinguish touching
+  vs penetrating. Burr-style interlock is by design unable to separate under
+  small axis-aligned nudges, so the probe always fails and the matched fixed
+  piece is reported as `penetrating`. The classifier had no notion of
+  "expected contact": the matched fixed piece is, by construction, supposed
+  to be in tangential contact with the moving piece at the target.
+- Fix: added `createMatchSceneQuery(baseQuery, expectedContactObjectIds)` in
+  `src/features/matching/matchFlow.js`. It wraps the scene query so the named
+  obstacle ids are filtered out of `getObstacleSnapshots(...)`, and the
+  inherited `classifyObjectAtTransform(...)` (which iterates
+  `this.getObstacleSnapshots(...)`) automatically sees the filtered list.
+- Wired `runMatchFlowCoordinator` to wrap the scene query with
+  `[matchResult.fixedPieceName]` for both planners (Block Adhere and CBiRRT)
+  and for the start/target-blocked diagnostics. Other obstacles are still
+  checked normally, so a third piece truly in the way is still reported as
+  the blocker.
+- Added the active list to the consolidated debug report under
+  `planner.expectedContactObjectIds` for visibility.
+- Notes:
+  - Side effect: a path that geometrically passes through the matched fixed
+    piece during free-space approach (e.g. straight translation through
+    Piece 4 to reach a staging pose on the far side) is now considered free
+    and will animate as a phase-through. This is acceptable for the burr
+    use case because the assembled-state interlock cannot be planned by
+    Block Adhere otherwise; the user can iterate on face selection or move
+    other pieces if the visualization is unsatisfactory.
+  - This fix unblocks CBiRRT for burr matches: previously CBiRRT also
+    aborted on `target-blocked` because it shares the same scene query.
+
+## Update [2026-05-06]: Consolidated Match Console Output
+
+- Replaced the scattered per-Match `console.log` calls (`Match result output`,
+  `Match pose output`, `Selected faces`, `Selected edges`, `Selected vertices`,
+  `Current pose world`, `Target pose world`, `Debug chain`,
+  `[Match Planner] planCollisionFreeSe3Path output`,
+  `[Match Planner] ... CBiRRT fallback output`,
+  `[Collision Debug] start-blocked trace`,
+  `[Collision Debug] target-blocked trace`) with one consolidated
+  `[Match Report]` object dumped at the end of each `runMatchFlowCoordinator`
+  invocation.
+- Added `buildMatchReport(...)` helper in `src/features/matching/matchFlow.js`.
+  Report shape:
+  - `summary`: `matchStatus`, `finalOutcome`
+    (`animated | planner-failed | need-edge | need-vertex | failure | exception`),
+    `fixedPieceName`, `movingPieceName`, `chosenPlanner`, `pathSteps`
+  - `selections`: `matchStage`, full `faces` / `edges` / `vertices` selection
+    arrays (incl. `selectedAt` ordering)
+  - `matchSolve`: `status`, `reason`, `candidate`, world poses, attachment
+    normal, full `debugChain` (faces/edges/vertices used, frame matrices,
+    decision trace, residuals)
+  - `planner`: `blockAdhere` and `cbirrtFallback` raw planner outputs (when
+    planner ran), so call-site has full transforms + stats + bestAttempt
+  - `diagnostics`: `startBlocked` / `targetBlocked` per-obstacle trace
+    (broadphase, narrowphase, contact classification, raw bounds), populated
+    only when those failure reasons triggered
+  - `error`: exception message when an exception was caught
+- Removed dead exports `outputCurrentAndTargetWorldPose` and
+  `logMatchComputationChain` from `matchFlow.js` (no callers left after the
+  consolidation).
+- Updated `src/mvp/app.js` to drop the corresponding imports and dependency
+  injections (`logMatchComputationChainFn`, `outputCurrentAndTargetWorldPoseFn`).
+- Stripped the inline `console.log("[Collision Debug] ... trace:", ...)`
+  calls inside `diagnoseStartBlocked(...)` and `diagnoseTargetBlocked(...)` in
+  `src/features/planning/sceneQuery.js`. They still return the same data; the
+  match flow now owns the single dump.
+- Net effect: each Match button click prints exactly one
+  `[Match Report]` console line containing all per-click debug data, suitable
+  for right-click -> "Copy object" -> paste into a chat for offline analysis.
+
+## Update [2026-05-06]: Target-Blocked Diagnostics + Normal Magnitude Fix
+
+- Added `diagnoseTargetBlocked(...)` helper in `src/features/planning/sceneQuery.js`,
+  mirroring `diagnoseStartBlocked(...)`. It runs the same per-obstacle collision
+  trace at the target pose and logs `[Collision Debug] target-blocked trace:`.
+- Wired the helper into `runMatchFlowCoordinator` in
+  `src/features/matching/matchFlow.js`:
+  - on `target-blocked`, the status bar now reports
+    `Path planning failed: target-blocked by <piece>` instead of the bare reason
+  - the full obstacle trace (broadphase / narrowphase / contact classification)
+    is dumped to console for offline inspection
+- Injected the new helper from `src/mvp/app.js`.
+- Fixed a magnitude bug in `computeTransform.ts` where
+  `debug.world.fixedFaceNormal` / `movingFaceNormal` were emitted with
+  magnitude `1/scale` (e.g. `20` for `scale=0.05` pieces) because of
+  `Matrix3.getNormalMatrix` scaling rules. The pre-normalization happened
+  before `applyMatrix3` instead of after; swapped the order so the emitted
+  world normals are unit length.
+  - Functional impact is nil for the existing planners (Block Adhere and
+    CBiRRT both `.normalize()` the input internally), but the debug output is
+    now numerically correct and safer for any future consumer that depends on
+    the magnitude.
+- Notes for future debugging:
+  - `target-blocked` with no obvious overlap is most often face-flush
+    numerical drift exceeding the `isLikelyTouchingContact` probe distance
+    (`max(collisionEpsilon * 8, 1e-4)`). If the new
+    `[Collision Debug] target-blocked trace` shows only the matched fixed
+    piece as the obstacle, raising `collisionEpsilon` (and indirectly the
+    probe distance) is the right knob.
+  - When the trace shows a third piece as the obstacle, the failure is real
+    geometry overlap and the puzzle truly needs another piece moved out of
+    the way first.
+
+## Update [2026-05-06]: Added CBiRRT Fallback Planner
+
+- Added new sampling-based planner under `src/features/physics/path-finding/cbirrt/`:
+  - `prng.ts` — deterministic mulberry32 PRNG so planning runs are reproducible per seed
+  - `sampler.ts` — uniform SE(3) sampler (Marsaglia quaternion + AABB position) and
+    shared SE(3) primitives (`transformDistance`, `interpolateTransform`,
+    `cloneTransform`, `deriveSamplingBounds`)
+  - `constraints.ts` — pluggable constraint manifolds:
+    - `M0` free space (identity projection)
+    - `M1` approach-along-normal (rotation locked to target, position locked to the
+      line through `target.position` along `attachmentNormalWorld`)
+  - `planCBiRRT.ts` — main CBiRRT-style bidirectional RRT with `ConstrainedExtend`,
+    multi-seed support, shortcut smoothing, and densified output matching
+    `planCollisionFreeSe3Path`'s shape
+- Wired the fallback into `runMatchFlowCoordinator` in `src/features/matching/matchFlow.js`:
+  - Block Adhere is still tried first as the fast path
+  - if it returns `not-found` for any reason other than `start-blocked`,
+    `target-blocked`, or `invalid-normal`, CBiRRT is invoked
+  - CBiRRT is seeded with `bestAttempt` from Block Adhere when present so the goal
+    tree starts from the closest staging pose Block Adhere reached
+  - status text now reports which planner produced the path
+    (`Animating path (N steps via CBiRRT)`)
+- Injected `planCBiRRT` from `src/mvp/app.js` into the match flow coordinator.
+- Documented the planner contract, algorithm sketch, tangential-contact handling,
+  determinism, and known limitations in `docs/collision-strategy.md` (new Section 5).
+- Notes:
+  - No new external dependencies. Reuses the existing `CollisionSceneQuery`
+    contract (`classifyObjectAtTransform` + BVH cache + touching probe), so
+    sliding contact remains path-valid by virtue of the existing `touching`
+    classification.
+  - Probabilistic completeness only; failures surface as
+    `time-budget-exceeded` / `iteration-budget-exceeded` rather than proofs
+    of infeasibility.
+  - M1 constraint is opt-in via `options.constraintActivationDistance`;
+    default behavior is plain BiRRT to keep the first integration conservative.
+
 ## Update [2026-05-01]: Replaced RRT Planner With Block Adhere Path
 
 - Updated `planCollisionFreeSe3Path(...)` in `src/features/physics/path-finding/collisionFreePath.ts` to use the Block Adhere algorithm instead of bidirectional RRT.

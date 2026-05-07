@@ -1,14 +1,15 @@
-import * as THREE from "https://esm.sh/three@0.181.1";
-import { OrbitControls } from "https://esm.sh/three@0.181.1/examples/jsm/controls/OrbitControls.js";
-import { STLLoader } from "https://esm.sh/three@0.181.1/examples/jsm/loaders/STLLoader.js";
-import { Line2 } from "https://esm.sh/three@0.181.1/examples/jsm/lines/Line2.js";
-import { LineMaterial } from "https://esm.sh/three@0.181.1/examples/jsm/lines/LineMaterial.js";
-import { LineGeometry } from "https://esm.sh/three@0.181.1/examples/jsm/lines/LineGeometry.js";
-import { MeshBVH } from "../../node_modules/three-mesh-bvh/src/core/MeshBVH.js";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import { Line2 } from "three/examples/jsm/lines/Line2.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
+import { MeshBVH } from "three-mesh-bvh";
 import { SAMPLE_PUZZLE_MANIFEST } from "../../public/sample-puzzle-manifest.js";
 import { extractMeshTopology } from "../features/puzzle-loader/adapters/puzzleAdapter.ts";
 import { computeMatchTransform } from "../features/physics/path-finding/computeTransform.ts";
 import { planCollisionFreeSe3Path } from "../features/physics/path-finding/collisionFreePath.browser.js";
+import { planCBiRRT } from "../features/physics/path-finding/cbirrt/planCBiRRT.ts";
 import {
   clearAllSelections as clearAllSelectionsImpl,
   clearFaceSelection as clearFaceSelectionImpl,
@@ -33,11 +34,12 @@ import {
 import { createTargetResolver } from "../features/interaction/selection/targetResolver.js";
 import {
   buildPiecesByNameMap as buildPiecesByNameMapImpl,
-  logMatchComputationChain as logMatchComputationChainImpl,
-  outputCurrentAndTargetWorldPose as outputCurrentAndTargetWorldPoseImpl,
   runMatchFlowCoordinator,
 } from "../features/matching/matchFlow.js";
-import { createCollisionSceneTools } from "../features/planning/sceneQuery.js";
+import {
+  createCollisionSceneTools,
+  createSceneQueryWithExpectedContacts,
+} from "../features/planning/sceneQuery.js";
 import {
   animatePieceAlongPath as animatePieceAlongPathImpl,
   applyPlannerTransformToPiece as applyPlannerTransformToPieceImpl,
@@ -63,6 +65,42 @@ const collisionSceneTools = createCollisionSceneTools({
   defaultCollisionEpsilon: DEFAULT_COLLISION_EPSILON,
   formatErrorMessage,
 });
+
+/**
+ * Per-frame collision guard. Used by the keyboard controller and the
+ * animation player to "constant-collision-test + bounce back" the moving
+ * piece. Rebuilds the scene query each call so obstacle snapshots reflect
+ * the current piece state. `expectedContactObjectIds` lets the caller mark
+ * pieces that are allowed to be in tangential contact (e.g. the matched
+ * fixed piece during Match animation).
+ */
+const collisionGuard = {
+  isPiecePenetrating(piece, options = {}) {
+    if (!piece) {
+      return { blocked: false, obstacleObjectId: null };
+    }
+    const expectedContactObjectIds = options.expectedContactObjectIds ?? [];
+    const baseQuery = collisionSceneTools.getCollisionSceneQuery();
+    const sceneQuery = expectedContactObjectIds.length === 0
+      ? baseQuery
+      : createSceneQueryWithExpectedContacts(baseQuery, expectedContactObjectIds);
+    const candidateTransform = collisionSceneTools.toPlannerTransformFromPiece(piece);
+    if (!candidateTransform) {
+      return { blocked: false, obstacleObjectId: null };
+    }
+    const result = sceneQuery.classifyObjectAtTransform({
+      movingObjectId: piece.name,
+      candidateTransform,
+      sceneQuery,
+      collisionEpsilon: DEFAULT_COLLISION_EPSILON,
+    });
+    return {
+      blocked: result.status === "penetrating",
+      obstacleObjectId: result.firstHit?.obstacleObjectId ?? null,
+      status: result.status,
+    };
+  },
+};
 const sceneBootstrap = createSceneBootstrap({
   THREE,
   OrbitControls,
@@ -445,15 +483,13 @@ function runMatchFlow() {
     sceneRuntime,
     computeMatchTransform,
     buildPiecesByNameMapFn: () => buildPiecesByNameMapImpl(state.pieces),
-    logMatchComputationChainFn: (matchResult) => logMatchComputationChainImpl(matchResult, state, console),
     clearMatchDisambiguationSelections: () => clearMatchDisambiguationSelectionsImpl(state),
     setMatchStage: (stage) => setMatchStageImpl(state, stage),
-    outputCurrentAndTargetWorldPoseFn: (matchResult) =>
-      outputCurrentAndTargetWorldPoseImpl(matchResult, setStatusMessage, console),
     syncPieceObjects,
     getCollisionSceneQuery: () => collisionSceneTools.getCollisionSceneQuery(),
     planCollisionFreeSe3Path,
-    animatePieceAlongPath: (movingPieceName, transforms) =>
+    planCBiRRT,
+    animatePieceAlongPath: (movingPieceName, transforms, options = {}) =>
       animatePieceAlongPathImpl({
         movingPieceName,
         transforms,
@@ -475,10 +511,16 @@ function runMatchFlow() {
         renderInspector,
         render,
         setStatusMessage,
+        collisionGuard,
+        expectedContactObjectIds: options.expectedContactObjectIds ?? [],
+        findPieceByName: (targetName) =>
+          state.pieces.find((piece) => piece.name === targetName) ?? null,
       }),
     shakeMatchButton,
     diagnoseStartBlocked: (sceneQuery, movingObjectId, startTransform) =>
       collisionSceneTools.diagnoseStartBlocked(sceneQuery, movingObjectId, startTransform),
+    diagnoseTargetBlocked: (sceneQuery, movingObjectId, targetTransform) =>
+      collisionSceneTools.diagnoseTargetBlocked(sceneQuery, movingObjectId, targetTransform),
     setStatusMessage,
     formatErrorMessage,
   });
@@ -688,9 +730,23 @@ const keyboardBindings = createKeyboardInputBindings({
   sceneRuntime,
   elements,
   findPieceByName: (pieceName) => state.pieces.find((piece) => piece.name === pieceName) ?? null,
+  collisionGuard,
 });
 sceneBootstrap.addFrameCallback((deltaSeconds) => {
-  if (!keyboardBindings.update(deltaSeconds)) {
+  const moved = keyboardBindings.update(deltaSeconds);
+  // Reflect the most recent collision-guard result in the status pill so the
+  // user gets immediate feedback that a key press was rejected for collision.
+  const block = keyboardBindings.getLastBlock?.() ?? null;
+  const newCollisionStatus = block
+    ? (block.obstacleObjectId
+      ? `Blocked by ${block.obstacleObjectId}`
+      : "Blocked")
+    : "Clear";
+  if (state.collisionStatus !== newCollisionStatus) {
+    state.collisionStatus = newCollisionStatus;
+    renderStatus();
+  }
+  if (!moved) {
     return;
   }
   syncPieceObjects();

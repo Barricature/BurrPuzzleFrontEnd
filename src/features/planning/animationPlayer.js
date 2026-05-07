@@ -46,6 +46,9 @@ export function animatePieceAlongPath({
   renderInspector,
   render,
   setStatusMessage,
+  collisionGuard,
+  expectedContactObjectIds = [],
+  findPieceByName,
 }) {
   if (!transforms?.length) {
     return;
@@ -61,9 +64,58 @@ export function animatePieceAlongPath({
   let segmentIndex = 0;
   let segmentStart = performance.now();
 
+  function snapshotPieceState(pieceName) {
+    if (typeof findPieceByName !== "function") return null;
+    const piece = findPieceByName(pieceName);
+    if (!piece) return null;
+    return {
+      piece,
+      position: piece.position
+        ? { x: piece.position.x, y: piece.position.y, z: piece.position.z }
+        : null,
+      rotationQuaternion: piece.rotationQuaternion
+        ? {
+          x: piece.rotationQuaternion.x,
+          y: piece.rotationQuaternion.y,
+          z: piece.rotationQuaternion.z,
+          w: piece.rotationQuaternion.w,
+        }
+        : null,
+      orientation: piece.orientation,
+    };
+  }
+
+  function restorePieceState(snapshot) {
+    if (!snapshot) return;
+    if (snapshot.position) snapshot.piece.position = snapshot.position;
+    if (snapshot.rotationQuaternion) snapshot.piece.rotationQuaternion = snapshot.rotationQuaternion;
+    if (typeof snapshot.orientation === "number") snapshot.piece.orientation = snapshot.orientation;
+  }
+
   const tick = (now) => {
     if (segmentIndex >= waypoints.length - 1) {
+      const finalSnapshot = snapshotPieceState(movingPieceName);
       applyPlannerTransformToPieceFn(movingPieceName, waypoints[waypoints.length - 1]);
+      // Final pose collision check: even though the planner validated the
+      // path under `expectedContactObjectIds`, double-check here so the
+      // animation never lands on a frame the user would consider invalid.
+      if (collisionGuard && finalSnapshot?.piece) {
+        const probe = collisionGuard.isPiecePenetrating(finalSnapshot.piece, {
+          expectedContactObjectIds,
+        });
+        if (probe?.blocked) {
+          restorePieceState(finalSnapshot);
+          state.isAnimating = false;
+          sceneRuntime.activeAnimationFrame = null;
+          render();
+          setStatusMessage(
+            probe.obstacleObjectId
+              ? `Animation aborted at final pose: collision with ${probe.obstacleObjectId}`
+              : "Animation aborted at final pose: collision detected",
+          );
+          return;
+        }
+      }
       state.isAnimating = false;
       sceneRuntime.activeAnimationFrame = null;
       render();
@@ -83,10 +135,34 @@ export function animatePieceAlongPath({
       .normalize()
       .slerp(new THREE.Quaternion(to.rotation.x, to.rotation.y, to.rotation.z, to.rotation.w).normalize(), t);
 
+    const preTickSnapshot = snapshotPieceState(movingPieceName);
     applyPlannerTransformToPieceFn(movingPieceName, {
       position: { x: interpPosition.x, y: interpPosition.y, z: interpPosition.z },
       rotation: { x: interpRotation.x, y: interpRotation.y, z: interpRotation.z, w: interpRotation.w },
     });
+
+    // Per-tick collision guard: if applying the interpolated transform
+    // penetrates a non-allowed obstacle, revert to the last good frame and
+    // abort the animation.
+    if (collisionGuard && preTickSnapshot?.piece) {
+      const probe = collisionGuard.isPiecePenetrating(preTickSnapshot.piece, {
+        expectedContactObjectIds,
+      });
+      if (probe?.blocked) {
+        restorePieceState(preTickSnapshot);
+        state.isAnimating = false;
+        sceneRuntime.activeAnimationFrame = null;
+        syncPieceObjects();
+        render();
+        setStatusMessage(
+          probe.obstacleObjectId
+            ? `Animation aborted: collision with ${probe.obstacleObjectId}`
+            : "Animation aborted: collision detected",
+        );
+        return;
+      }
+    }
+
     syncPieceObjects();
     renderThreeScene();
     renderInspector();

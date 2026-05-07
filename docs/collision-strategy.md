@@ -319,3 +319,99 @@ Output: unique target `SE(3)` for `planCollisionFreeSe3Path(...)`.
 - Contact classification includes a touching-vs-penetrating heuristic:
   - geometry intersection + resolvable micro-separation is treated as `touching` (allowed)
   - persistent intersection across probe directions remains `penetrating` (blocked).
+
+## 5) CBiRRT Fallback Planner
+
+The Block Adhere planner is fast but only succeeds when the start->target
+motion fits its "stage along `+n`, approach along `-n`" template. When it
+returns `not-found` for any reason other than `start-blocked`,
+`target-blocked`, or `invalid-normal`, the match flow falls back to a
+sampling-based planner inspired by CBiRRT (Berenson et al., 2009) so that
+matches with non-trivial free-space motion or sliding contact can still
+succeed.
+
+Implementation: `src/features/physics/path-finding/cbirrt/planCBiRRT.ts`.
+
+### Planner Inputs / Outputs
+
+- Inputs are a superset of `planCollisionFreeSe3Path`:
+  - same `movingObjectId`, `startTransform`, `targetTransform`,
+    `attachmentNormalWorld`, `sceneQuery`
+  - `seedTransforms?`: extra goal-tree seeds. The match flow forwards Block
+    Adhere's `bestAttempt` (its last attempted staging pose) as a seed; this
+    pose is on the M1 manifold by construction and dramatically reduces the
+    search effort on near-miss insertions.
+  - `options.seed`: numeric seed for the deterministic mulberry32 PRNG so
+    planning runs are reproducible across sessions.
+  - `options.maxIterations` / `options.maxPlanningTimeMs`: search budget.
+  - `options.translationStep` / `options.rotationStepRadians`: step caps used
+    for both extension and segment validation.
+  - `options.constraintActivationDistance`: when supplied with a non-null
+    positive value, configurations within that radius of the target are
+    snapped to the M1 manifold (rotation locked to target, position locked
+    to the line through the target along `attachmentNormalWorld`). Default
+    `null` disables the constraint, making the planner a plain BiRRT.
+- Output statuses:
+  - `found` with the same `transforms` shape Block Adhere produces (densified
+    according to step caps), plus `stats.plannerKind = "cbirrt"`.
+  - `not-found` with `reason = "start-blocked" | "target-blocked" |
+    "time-budget-exceeded" | "iteration-budget-exceeded"`.
+
+### Algorithm Sketch
+
+1. Validate that `startTransform` and `targetTransform` are not penetrating;
+   short-circuit with `start-blocked` / `target-blocked` if they are.
+2. Build the constraint library:
+   - free-space M0 (identity projection)
+   - M1 approach-along-normal (geometric projection: rotation locked to
+     target, position locked to the line through the target along the
+     attachment normal)
+3. Initialize two trees: start tree seeded with `startTransform`, goal tree
+   seeded with `targetTransform` plus any non-penetrating extras supplied via
+   `seedTransforms`.
+4. Each iteration:
+   - sample a random SE(3) pose (uniform position in derived bounds + uniform
+     unit quaternion via the Marsaglia method); with probability
+     `goalSampleProbability` instead pick a random node from the other tree
+   - run `ConstrainedExtend` on the active tree toward the sample: take a
+     bounded SE(3) step (lerp position + slerp rotation), project to the
+     constraint chosen by the current configuration's region, validate the
+     micro-segment against the BVH narrowphase, repeat until blocked or
+     reached
+   - run `ConstrainedExtend` on the other tree toward the last reached node
+   - if the two trees meet within `connectionEpsilon`, reconstruct the path,
+     run shortcut smoothing, densify per step caps, and return
+   - otherwise swap the active tree role and continue
+5. On budget exhaustion (`maxIterations` or `maxPlanningTimeMs`), return
+   `not-found` with the `bestAttempt` set to the start-tree node closest to
+   the target (useful for diagnostics and future replanning).
+
+### Tangential Contact Handling
+
+CBiRRT inherits the `touching` classification from
+`classifyObjectAtTransform(...)`: configurations whose BVH narrowphase
+reports geometric intersection but resolves under micro-separation probes are
+treated as path-valid, so the planner is allowed to slide along contact
+faces. This is the key reason CBiRRT can succeed where star-shaped roadmaps
+or vanilla cell decomposition would fail.
+
+### Determinism and Diagnostics
+
+- Same scene + same `options.seed` produces the same path. The trace-based
+  debug workflow (`progress.md` style fix-by-replay) still works.
+- Block Adhere's structured failure reasons are preserved when the fallback
+  also fails or is skipped (`start-blocked` / `target-blocked` /
+  `invalid-normal`); the CBiRRT result is logged separately under
+  `[Match Planner] Block Adhere reason=...; CBiRRT fallback output:`.
+- The match status bar surfaces which planner produced the path, e.g.
+  `Animating path (12 steps via CBiRRT)`.
+
+### Known Limitations
+
+- Probabilistic completeness only. CBiRRT cannot prove path non-existence;
+  `iteration-budget-exceeded` and `time-budget-exceeded` are runtime
+  exhaustion signals, not infeasibility proofs.
+- Single-manifold M1 only. More complex sliding chains
+  (e.g. face-parallel slide that does not lie on a single line through the
+  target) require additional constraint definitions; current default usage
+  leaves the constraint disabled and runs as plain BiRRT.

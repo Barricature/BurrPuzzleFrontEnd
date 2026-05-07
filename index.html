@@ -5,13 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Burr Puzzle Frontend MVP</title>
     <link rel="stylesheet" href="./src/mvp/styles.css" />
-    <script type="importmap">
-      {
-        "imports": {
-          "three": "https://esm.sh/three@0.181.1"
-        }
-      }
-    </script>
   </head>
   <body>
     <div class="app-shell">
@@ -165,6 +158,17 @@
                 <span class="keycap">Drag</span>
               </div>
               <p class="control-note">Orbit / drag full scene view</p>
+            </div>
+            <div class="help-divider" aria-hidden="true"></div>
+            <div class="control-row">
+              <p class="control-subtitle">Face Match Workflow</p>
+              <ol class="control-list">
+                <li>Left-click one face on the fixed piece, then one face on the moving piece.</li>
+                <li>(Optional) Add edge and vertex constraints by clicking matching edges/vertices.</li>
+                <li>Click <strong>Match</strong> to compute and play a collision-safe path.</li>
+                <li>If a selection is wrong, click <strong>Clear Selection</strong> and re-pick.</li>
+              </ol>
+              <p class="control-note">Tip: face-only matching is the fastest way to test an assembly direction.</p>
             </div>
           </div>
         </div>

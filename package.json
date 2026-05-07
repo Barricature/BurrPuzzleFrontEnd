@@ -4,12 +4,16 @@
   "version": "0.1.0",
   "description": "Minimal viable static workspace for a burr puzzle frontend.",
   "scripts": {
-    "dev": "\"%npm_node_execpath%\" server.js",
-    "build": "\"%npm_node_execpath%\" scripts/noop-build.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "test": "\"%npm_node_execpath%\" --test"
   },
   "dependencies": {
     "three": "^0.184.0",
     "three-mesh-bvh": "^0.9.9"
+  },
+  "devDependencies": {
+    "vite": "^7.1.5"
   }
 }

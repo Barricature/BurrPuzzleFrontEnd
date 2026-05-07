@@ -1,5 +1,5 @@
 // @ts-nocheck
-import * as THREE from "https://esm.sh/three@0.181.1";
+import * as THREE from "three";
 
 const EPSILON_LENGTH = 1e-3;
 const EPSILON_AREA = 1e-3;
@@ -581,15 +581,22 @@ function computeTargetPose({
         },
       },
       world: {
+        // Re-normalize after applyMatrix3 because Matrix3.getNormalMatrix
+        // (= inverse-transpose of the upper-left 3x3) scales the normal by
+        // 1/scale for uniformly-scaled matrices. Without this, world normals
+        // come out with magnitude 1/scale (e.g. 20 for the project's
+        // scale=0.05 pieces), which is fine for direction-only consumers
+        // (planners normalize internally) but misleading in debug output and
+        // a hazard for any future consumer that uses the magnitude.
         fixedFaceNormal: toPlainVector3(
           new THREE.Vector3(fixedFace.normal.x, fixedFace.normal.y, fixedFace.normal.z)
-            .normalize()
-            .applyMatrix3(new THREE.Matrix3().getNormalMatrix(XA)),
+            .applyMatrix3(new THREE.Matrix3().getNormalMatrix(XA))
+            .normalize(),
         ),
         movingFaceNormal: toPlainVector3(
           new THREE.Vector3(movingFace.normal.x, movingFace.normal.y, movingFace.normal.z)
-            .normalize()
-            .applyMatrix3(new THREE.Matrix3().getNormalMatrix(currentMatrix)),
+            .applyMatrix3(new THREE.Matrix3().getNormalMatrix(currentMatrix))
+            .normalize(),
         ),
         fixedPose: toPlainMatrix4(XA),
         movingCurrentPose: toPlainMatrix4(currentMatrix),

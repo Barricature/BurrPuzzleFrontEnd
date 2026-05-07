@@ -18,9 +18,11 @@ export function createKeyboardInputBindings({
   sceneRuntime,
   elements,
   findPieceByName,
+  collisionGuard,
   translationSpeed = DEFAULT_TRANSLATION_SPEED,
   rotationSpeedRad = DEFAULT_ROTATION_SPEED_RAD,
 }) {
+  let lastBlock = null;
   const pressedKeys = new Set();
   const moveVector = new THREE.Vector3();
   const forward = new THREE.Vector3();
@@ -134,13 +136,42 @@ export function createKeyboardInputBindings({
       moveVector.sub(forward);
     }
 
-    let changed = false;
+    // Translation: try each world axis component independently so the user
+    // can "slide along walls" when the combined motion would penetrate.
+    // Without this, a single blocked axis component would veto the whole
+    // frame (e.g. after a Match the moving piece is interlocked along world
+    // X but free along world Z; the long-axis disassembly slide fails as
+    // soon as the screen-axis input has any X component).
+    let translationApplied = false;
+    let translationAttempted = false;
+    let translationBlock = null;
     if (moveVector.lengthSq() > 1e-12) {
+      translationAttempted = true;
       moveVector.normalize().multiplyScalar(translationSpeed * deltaSeconds);
-      piece.position.x += moveVector.x;
-      piece.position.y += moveVector.z;
-      piece.position.z += moveVector.y;
-      changed = true;
+
+      // Map world-axis deltas to the piece-state field they end up in.
+      // `getMeshCenter(piece)` and `applyPlannerTransformToPiece(...)` both
+      // use this convention: world X => piece.position.x,
+      // world Y => piece.position.z, world Z => piece.position.y.
+      const axisAttempts = [
+        { delta: moveVector.x, field: "x" },
+        { delta: moveVector.z, field: "y" },
+        { delta: moveVector.y, field: "z" },
+      ];
+      for (const attempt of axisAttempts) {
+        if (Math.abs(attempt.delta) <= 1e-12) continue;
+        const before = piece.position[attempt.field];
+        piece.position[attempt.field] = before + attempt.delta;
+        if (collisionGuard) {
+          const probe = collisionGuard.isPiecePenetrating(piece);
+          if (probe?.blocked) {
+            piece.position[attempt.field] = before;
+            translationBlock = probe;
+            continue;
+          }
+        }
+        translationApplied = true;
+      }
     }
 
     const rotationInput = [];
@@ -178,7 +209,24 @@ export function createKeyboardInputBindings({
       rotationInput.push({ axis: orthogonalAxis, sign: -1 });
     }
 
+    let rotationApplied = false;
+    let rotationAttempted = false;
+    let rotationBlock = null;
     if (rotationInput.length > 0) {
+      rotationAttempted = true;
+      // Rotation is applied atomically (composed quaternions do not commute,
+      // so per-axis decomposition is meaningless here); on collision we
+      // revert just the rotation and keep any translation that succeeded.
+      const rotationBefore = piece.rotationQuaternion
+        ? {
+          x: piece.rotationQuaternion.x,
+          y: piece.rotationQuaternion.y,
+          z: piece.rotationQuaternion.z,
+          w: piece.rotationQuaternion.w,
+        }
+        : null;
+      const orientationBefore = piece.orientation;
+
       const currentRotation = new THREE.Quaternion(
         piece.rotationQuaternion?.x ?? 0,
         piece.rotationQuaternion?.y ?? 0,
@@ -196,15 +244,40 @@ export function createKeyboardInputBindings({
         z: currentRotation.z,
         w: currentRotation.w,
       };
-      changed = true;
+      if (collisionGuard) {
+        const probe = collisionGuard.isPiecePenetrating(piece);
+        if (probe?.blocked) {
+          if (rotationBefore) piece.rotationQuaternion = rotationBefore;
+          if (typeof orientationBefore === "number") piece.orientation = orientationBefore;
+          rotationBlock = probe;
+        } else {
+          rotationApplied = true;
+        }
+      } else {
+        rotationApplied = true;
+      }
     }
 
-    return changed;
+    const anyAttempted = translationAttempted || rotationAttempted;
+    const anyApplied = translationApplied || rotationApplied;
+    // Surface a "blocked" status only when the user pressed a key but
+    // nothing was applied this frame; partial slides are not blocked.
+    if (anyAttempted && !anyApplied) {
+      lastBlock = translationBlock ?? rotationBlock ?? { blocked: true, obstacleObjectId: null };
+      return false;
+    }
+    lastBlock = null;
+    return anyApplied;
+  }
+
+  function getLastBlock() {
+    return lastBlock;
   }
 
   return {
     bind,
     unbind,
     update,
+    getLastBlock,
   };
 }

@@ -1,3 +1,39 @@
+/**
+ * Wrap a `CollisionSceneQuery` so the listed obstacle ids are removed from
+ * `getObstacleSnapshots(...)`. Tangential contact with those obstacles is
+ * then treated as path-valid by the planner because they no longer appear
+ * in the iteration. Used by:
+ *   - the match flow, where the matched fixed piece is in face-contact at
+ *     target by construction
+ *   - the per-frame collision guard during animation, for the same reason
+ *
+ * `classifyObjectAtTransform` is delegated through `this` so the underlying
+ * implementation (which iterates `this.getObstacleSnapshots(...)`) sees the
+ * filtered list automatically.
+ */
+export function createSceneQueryWithExpectedContacts(baseQuery, expectedContactObjectIds) {
+  if (!expectedContactObjectIds || expectedContactObjectIds.length === 0) {
+    return baseQuery;
+  }
+  const allowedSet = new Set(expectedContactObjectIds);
+  return {
+    getMovingObjectSnapshot(objectId) {
+      return baseQuery.getMovingObjectSnapshot(objectId);
+    },
+    getCollisionCache(collisionMeshId) {
+      return baseQuery.getCollisionCache(collisionMeshId);
+    },
+    getObstacleSnapshots(movingObjectId) {
+      return baseQuery
+        .getObstacleSnapshots(movingObjectId)
+        .filter((snapshot) => !allowedSet.has(snapshot.objectId));
+    },
+    classifyObjectAtTransform(input) {
+      return baseQuery.classifyObjectAtTransform.call(this, input);
+    },
+  };
+}
+
 export function createCollisionSceneTools({
   THREE,
   state,
@@ -62,6 +98,127 @@ export function createCollisionSceneTools({
     }
 
     return false;
+  }
+
+  /**
+   * Classify a contact between two BVH-equipped meshes by walking every pair
+   * of triangles that BVH-overlaps and asking, for each intersecting pair,
+   * whether the contact is purely tangential or a real 3D penetration.
+   *
+   *   separated   = no triangle pairs intersect
+   *   touching    = every intersecting pair is tangential, where tangential
+   *                 means either:
+   *                   (a) the two triangles are coplanar (face-flush) — the
+   *                       intersection is a 2D region inside the shared
+   *                       plane and neither triangle pokes through the
+   *                       other, or
+   *                   (b) the intersection segment lies entirely on the
+   *                       boundary (one of the three edges) of one of the
+   *                       triangles — i.e. edge-on-edge, edge-on-face, or
+   *                       vertex-on-anything contact
+   *   penetrating = at least one intersecting pair is non-coplanar AND the
+   *                 intersection segment cuts through the interior of both
+   *                 triangles — i.e. one face actually pokes into the other
+   *
+   * This is strictly more accurate than the axis-aligned nudge probe for
+   * burr-style interlocked geometry: interlocked pieces cannot be separated
+   * by a small axis-aligned nudge so the probe always falsely classifies
+   * face-flush contact as `penetrating`. Coplanarity + boundary tangency are
+   * purely local geometric properties and give the right answer regardless
+   * of the surrounding interlock.
+   *
+   * Implementation notes:
+   * - Uses `MeshBVH.bvhcast(otherBvh, matrixToLocal, { intersectsTriangles })`
+   *   from `three-mesh-bvh`. The library transforms the moving triangles
+   *   into the obstacle local frame internally, so both `triObstacle` and
+   *   `triMoving` arrive in the obstacle frame and planes/segments can be
+   *   compared directly.
+   * - `ExtendedTriangle.intersectsTriangle(other, target)` populates the
+   *   `Line3` target with the intersection segment, which the boundary
+   *   tangency check uses.
+   * - The callback returns `true` to early-exit the bvhcast as soon as a
+   *   genuine non-coplanar interior penetration is detected.
+   */
+  function classifyTriangleContact({
+    movingCache,
+    obstacleCache,
+    movingMatrix,
+    obstacleMatrix,
+    planarityEpsilon = 1e-3,
+    normalDotEpsilon = 1e-3,
+  }) {
+    const movingToObstacle = new THREE.Matrix4()
+      .copy(obstacleMatrix)
+      .invert()
+      .multiply(movingMatrix);
+
+    const intersectionLine = new THREE.Line3();
+    const segmentVecAB = new THREE.Vector3();
+    const segmentVecAP = new THREE.Vector3();
+    const segmentProj = new THREE.Vector3();
+
+    function distanceToSegment(point, a, b) {
+      segmentVecAB.subVectors(b, a);
+      segmentVecAP.subVectors(point, a);
+      const lengthSq = segmentVecAB.lengthSq();
+      if (lengthSq < 1e-30) {
+        return segmentVecAP.length();
+      }
+      let t = segmentVecAP.dot(segmentVecAB) / lengthSq;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      segmentProj.copy(segmentVecAB).multiplyScalar(t).add(a);
+      return point.distanceTo(segmentProj);
+    }
+
+    function isPointNearTriangleBoundary(point, triangle, epsilon) {
+      return distanceToSegment(point, triangle.a, triangle.b) <= epsilon
+        || distanceToSegment(point, triangle.b, triangle.c) <= epsilon
+        || distanceToSegment(point, triangle.c, triangle.a) <= epsilon;
+    }
+
+    function isLineFullyOnTriangleBoundary(line, triangle, epsilon) {
+      return isPointNearTriangleBoundary(line.start, triangle, epsilon)
+        && isPointNearTriangleBoundary(line.end, triangle, epsilon);
+    }
+
+    let hasContact = false;
+    let hasInteriorPenetration = false;
+
+    obstacleCache.bvh.bvhcast(movingCache.bvh, movingToObstacle, {
+      intersectsTriangles(triObstacle, triMoving) {
+        if (!triObstacle.intersectsTriangle(triMoving, intersectionLine)) {
+          return false;
+        }
+        hasContact = true;
+
+        const normalAlignment = Math.abs(
+          triObstacle.plane.normal.dot(triMoving.plane.normal),
+        );
+        if (normalAlignment > 1 - normalDotEpsilon) {
+          const planeOffset = Math.abs(triMoving.plane.distanceToPoint(triObstacle.a));
+          if (planeOffset < planarityEpsilon) {
+            // (a) coplanar tangential contact
+            return false;
+          }
+        }
+
+        if (
+          isLineFullyOnTriangleBoundary(intersectionLine, triObstacle, planarityEpsilon)
+          || isLineFullyOnTriangleBoundary(intersectionLine, triMoving, planarityEpsilon)
+        ) {
+          // (b) edge-on-edge / edge-on-face / vertex contact
+          return false;
+        }
+
+        hasInteriorPenetration = true;
+        return true;
+      },
+    });
+
+    if (hasInteriorPenetration) return "penetrating";
+    if (hasContact) return "touching";
+    return "separated";
   }
 
   function toPlannerTransformFromPiece(piece) {
@@ -158,31 +315,27 @@ export function createCollisionSceneTools({
             continue;
           }
 
-          const movingToObstacle = new THREE.Matrix4().copy(obstacleMatrix).invert().multiply(movingMatrix);
-          if (obstacleCache.bvh.intersectsGeometry(movingCache.geometry, movingToObstacle)) {
-            if (isLikelyTouchingContact({
-              movingCache,
-              obstacleCache,
-              movingMatrix,
-              obstacleMatrix,
-              collisionEpsilon: input.collisionEpsilon,
-            })) {
-              return {
-                status: "touching",
-                firstHit: {
-                  movingObjectId: input.movingObjectId,
-                  obstacleObjectId: obstacle.objectId,
-                },
-              };
-            }
-            return {
-              status: "penetrating",
-              firstHit: {
-                movingObjectId: input.movingObjectId,
-                obstacleObjectId: obstacle.objectId,
-              },
-            };
+          // Coplanar tangent-face detection: every intersecting triangle pair
+          // must share a plane to be classified as `touching`. Any
+          // non-coplanar pair => true 3D penetration.
+          const planarityEpsilon = Math.max(input.collisionEpsilon * 100, 1e-4);
+          const status = classifyTriangleContact({
+            movingCache,
+            obstacleCache,
+            movingMatrix,
+            obstacleMatrix,
+            planarityEpsilon,
+          });
+          if (status === "separated") {
+            continue;
           }
+          return {
+            status,
+            firstHit: {
+              movingObjectId: input.movingObjectId,
+              obstacleObjectId: obstacle.objectId,
+            },
+          };
         }
         return { status: "separated" };
       },
@@ -199,36 +352,32 @@ export function createCollisionSceneTools({
       const movingBounds = movingBoundsRaw.clone().expandByScalar(collisionEpsilon);
 
       const obstacleTraces = [];
+      const planarityEpsilon = Math.max(collisionEpsilon * 100, 1e-4);
       for (const obstacle of sceneQuery.getObstacleSnapshots(movingObjectId)) {
         const obstacleCache = sceneQuery.getCollisionCache(obstacle.collisionMeshId);
         const obstacleMatrix = toMatrixFromPlannerTransform(obstacle.worldTransform);
         const obstacleBoundsRaw = obstacleCache.localBounds.clone().applyMatrix4(obstacleMatrix);
         const obstacleBounds = obstacleBoundsRaw.clone().expandByScalar(collisionEpsilon);
         const broadphaseIntersects = movingBounds.intersectsBox(obstacleBounds);
-        let narrowphaseIntersects = false;
         let contactStatus = "separated";
 
         if (broadphaseIntersects) {
-          const movingToObstacle = new THREE.Matrix4().copy(obstacleMatrix).invert().multiply(movingMatrix);
-          narrowphaseIntersects = obstacleCache.bvh.intersectsGeometry(movingCache.geometry, movingToObstacle);
-          if (narrowphaseIntersects) {
-            contactStatus = isLikelyTouchingContact({
-              movingCache,
-              obstacleCache,
-              movingMatrix,
-              obstacleMatrix,
-              collisionEpsilon,
-            })
-              ? "touching"
-              : "penetrating";
-          }
+          contactStatus = classifyTriangleContact({
+            movingCache,
+            obstacleCache,
+            movingMatrix,
+            obstacleMatrix,
+            planarityEpsilon,
+          });
         }
 
         obstacleTraces.push({
           obstacleObjectId: obstacle.objectId,
           obstacleTransform: obstacle.worldTransform,
           broadphaseIntersects,
-          narrowphaseIntersects,
+          // `narrowphaseIntersects` is now equivalent to "any triangle pair
+          // overlapped during the coplanar walk" (touching OR penetrating).
+          narrowphaseIntersects: contactStatus !== "separated",
           contactStatus,
           movingBounds: {
             min: { x: movingBoundsRaw.min.x, y: movingBoundsRaw.min.y, z: movingBoundsRaw.min.z },
@@ -261,6 +410,8 @@ export function createCollisionSceneTools({
     }
   }
 
+  // diagnose* return data only; the match flow consolidates them into a
+  // single `[Match Report]` console dump so callers do not double-log here.
   function diagnoseStartBlocked(sceneQuery, movingObjectId, startTransform) {
     const trace = buildCollisionDebugTrace(
       sceneQuery,
@@ -268,7 +419,19 @@ export function createCollisionSceneTools({
       startTransform,
       defaultCollisionEpsilon,
     );
-    console.log("[Collision Debug] start-blocked trace:", trace);
+    return {
+      obstacleObjectId: trace.firstPenetratingObstacleId ?? null,
+      trace,
+    };
+  }
+
+  function diagnoseTargetBlocked(sceneQuery, movingObjectId, targetTransform) {
+    const trace = buildCollisionDebugTrace(
+      sceneQuery,
+      movingObjectId,
+      targetTransform,
+      defaultCollisionEpsilon,
+    );
     return {
       obstacleObjectId: trace.firstPenetratingObstacleId ?? null,
       trace,
@@ -279,9 +442,11 @@ export function createCollisionSceneTools({
     toMatrixFromPlannerTransform,
     withScaleFromReference,
     isLikelyTouchingContact,
+    classifyTriangleContact,
     toPlannerTransformFromPiece,
     getCollisionSceneQuery,
     buildCollisionDebugTrace,
     diagnoseStartBlocked,
+    diagnoseTargetBlocked,
   };
 }

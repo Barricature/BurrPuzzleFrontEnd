@@ -231,6 +231,25 @@ button {
   line-height: 1.4;
 }
 
+.control-subtitle {
+  margin: 0;
+  font-weight: 700;
+}
+
+.control-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  line-height: 1.45;
+  display: grid;
+  gap: 4px;
+}
+
+.help-divider {
+  height: 1px;
+  background: var(--border);
+}
+
 .info-row {
   display: flex;
   align-items: center;

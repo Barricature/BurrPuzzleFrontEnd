@@ -1,4 +1,4 @@
-import * as THREE from "https://esm.sh/three@0.181.1";
+import * as THREE from "three";
 
 export const sceneRuntime = {
   scene: null,

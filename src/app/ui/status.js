@@ -13,7 +13,11 @@ export function renderStatus(state, elements) {
   elements.successStatus.textContent = `Success: ${state.successStatus}`;
 
   elements.loadStatus.className = `status-pill ${state.loadStatus === "Loaded" ? "is-success" : ""}`.trim();
-  elements.collisionStatus.className = "status-pill is-success";
+  // The collision guard sets `state.collisionStatus` to "Clear" or
+  // "Blocked[/Blocked by <piece>]". Render the red is-warning pill when
+  // anything other than "Clear" is reported.
+  const collisionVariant = state.collisionStatus === "Clear" ? "is-success" : "is-warning";
+  elements.collisionStatus.className = `status-pill ${collisionVariant}`;
   elements.successStatus.className = "status-pill";
 }
 

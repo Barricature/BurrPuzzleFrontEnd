@@ -1,65 +1,61 @@
 # Burr Puzzle Frontend
 
-Browser-based MVP for interacting with a simple 3D burr puzzle layout.  
-The current runnable slice loads sample model assets with Three.js loaders, renders pieces in a Three.js scene, supports selection and transform controls, and shows basic collision/success status.
+A browser app for trying 3D burr-puzzle assembly and disassembly moves.
 
-## Current State
+## Quick Start
 
-- A working MVP exists in `index.html` + `src/mvp/app.js` + `src/mvp/styles.css`.
-- Sample piece metadata is loaded from `public/sample-puzzle-manifest.js`.
-- A lightweight Node static server in `server.js` powers local development.
-- Refactor in progress: foundational modules now exist under `src/app/core` and `src/app/ui`, while orchestration still lives in `src/mvp/app.js`.
-- Detailed snapshot: see `progress.md`.
-
-## Install
-
-### Requirements
-
-- Node.js 18+ (or current LTS)
-- npm (bundled with Node)
-
-### Dependencies
-
-Install project dependencies:
+1. Install Node.js 18+.
+2. Install dependencies:
 
 ```bash
 npm install
 ```
 
-## Run The App
-
-Start the local server:
+3. Start the app:
 
 ```bash
 npm run dev
 ```
 
-Then open:
+4. Open the URL shown in terminal (usually `http://localhost:5173`).
 
-- `http://localhost:4173`
+## How To Use
 
-## Other Scripts
+### Select a piece
 
-- `npm run build` - currently placeholder (`scripts/noop-build.js`)
-- `npm test` - runs Node test runner (no tests implemented yet)
+- Click a piece in the left panel.
 
-## Project Layout (Relevant Today)
+### Move / rotate the selected piece
 
-- `index.html` - app shell and UI structure
-- `src/mvp/app.js` - MVP logic, state, Three.js runtime, movement/collision logic
-- `src/app/core/constants.js` - shared runtime constants extracted from MVP entrypoint
-- `src/app/core/runtime.js` - centralized app runtime/state/elements containers
-- `src/app/bootstrap/events.js` - extracted startup event wiring (global error hooks + UI control events)
-- `src/app/ui/status.js` - shared status/inspector rendering helpers
-- `src/features/interaction/selection/selectionState.js` - selection state operations extracted from MVP orchestration
-- `src/features/interaction/selection/interactionHandlers.js` - extracted pointer/click interaction handlers
-- `src/features/interaction/selection/targetResolver.js` - extracted raycast and screen-space target resolution
-- `src/features/interaction/transform/inputBindings.js` - continuous keyboard movement/rotation bindings for selected pieces
-- `src/features/matching/matchFlow.js` - extracted match action orchestration and debug output helpers
-- `src/features/planning/sceneQuery.js` - extracted collision scene query + start-block debug diagnostics
-- `src/features/planning/animationPlayer.js` - extracted planner transform application + animation playback
-- `src/features/rendering/sceneBootstrap.js` - extracted scene setup, resize sync, canvas event wiring, and render-loop bootstrap
-- `src/mvp/styles.css` - MVP styling
-- `public/sample-puzzle-manifest.js` - sample piece sources and initial positions
-- `server.js` - local static file server
-- `progress.md` - current implementation progress tracker
+- `W/A/S/D`: move in screen-parallel directions
+- `Q/E`: rotate around screen-parallel axis
+- `Left/Right`: rotate around ground-parallel axis
+- `R/F`: rotate around axis orthogonal to ground and screen
+
+If a move would cause penetration, it is blocked and rolled back.
+
+### Face Match workflow
+
+1. Left-click one face on the fixed piece.
+2. Left-click one face on the moving piece.
+3. (Optional) add edge/vertex constraints for disambiguation.
+4. Click `Match` to compute and play the path.
+5. Use `Clear Selection` to restart picks.
+
+## Status Bar
+
+- `Load`: asset loading status
+- `Collision`: `Clear` or `Blocked`
+- `Success`: current match outcome
+
+## Troubleshooting
+
+- **App does not open:** make sure `npm run dev` is running and use its printed URL.
+- **Match fails:** clear selections and pick faces again in fixed-then-moving order.
+- **Piece cannot move:** collision guard is preventing penetration; try another direction.
+
+## For Maintainers
+
+- Build production bundle: `npm run build`
+- Preview production build: `npm run preview`
+- GitHub Pages auto-deploy workflow: `.github/workflows/deploy-pages.yml`
