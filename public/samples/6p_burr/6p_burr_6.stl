@@ -1,0 +1,198 @@
+solid 6 piece burr puzzle
+facet normal 0.0 0.0 1.0
+outer loop
+vertex 175.0 0.0 25.0
+vertex 150.0 25.0 25.0
+vertex 150.0 0.0 25.0
+endloop
+endfacet
+facet normal 0.0 0.0 1.0
+outer loop
+vertex 150.0 25.0 25.0
+vertex 175.0 0.0 25.0
+vertex 175.0 25.0 25.0
+endloop
+endfacet
+facet normal 0.0 0.0 -1.0
+outer loop
+vertex 175.0 75.0 0.0
+vertex 150.0 0.0 0.0
+vertex 150.0 75.0 0.0
+endloop
+endfacet
+facet normal 0.0 0.0 -1.0
+outer loop
+vertex 150.0 0.0 0.0
+vertex 175.0 75.0 0.0
+vertex 175.0 0.0 0.0
+endloop
+endfacet
+facet normal 1.0 0.0 0.0
+outer loop
+vertex 175.0 0.0 0.0
+vertex 175.0 25.0 12.5
+vertex 175.0 0.0 25.0
+endloop
+endfacet
+facet normal 1.0 0.0 0.0
+outer loop
+vertex 175.0 25.0 12.5
+vertex 175.0 0.0 0.0
+vertex 175.0 75.0 0.0
+endloop
+endfacet
+facet normal 1.0 0.0 0.0
+outer loop
+vertex 175.0 25.0 12.5
+vertex 175.0 75.0 0.0
+vertex 175.0 62.5 12.5
+endloop
+endfacet
+facet normal 1.0 0.0 0.0
+outer loop
+vertex 175.0 62.5 12.5
+vertex 175.0 75.0 0.0
+vertex 175.0 62.5 25.0
+endloop
+endfacet
+facet normal 1.0 0.0 0.0
+outer loop
+vertex 175.0 62.5 25.0
+vertex 175.0 75.0 0.0
+vertex 175.0 75.0 25.0
+endloop
+endfacet
+facet normal 1.0 0.0 0.0
+outer loop
+vertex 175.0 25.0 25.0
+vertex 175.0 0.0 25.0
+vertex 175.0 25.0 12.5
+endloop
+endfacet
+facet normal 0.0 1.0 0.0
+outer loop
+vertex 150.0 75.0 25.0
+vertex 175.0 75.0 0.0
+vertex 150.0 75.0 0.0
+endloop
+endfacet
+facet normal 0.0 1.0 0.0
+outer loop
+vertex 175.0 75.0 0.0
+vertex 150.0 75.0 25.0
+vertex 175.0 75.0 25.0
+endloop
+endfacet
+facet normal 0.0 -1.0 0.0
+outer loop
+vertex 175.0 0.0 25.0
+vertex 150.0 0.0 0.0
+vertex 175.0 0.0 0.0
+endloop
+endfacet
+facet normal 0.0 -1.0 0.0
+outer loop
+vertex 150.0 0.0 0.0
+vertex 175.0 0.0 25.0
+vertex 150.0 0.0 25.0
+endloop
+endfacet
+facet normal -1.0 0.0 0.0
+outer loop
+vertex 150.0 75.0 25.0
+vertex 150.0 62.5 12.5
+vertex 150.0 62.5 25.0
+endloop
+endfacet
+facet normal -1.0 0.0 0.0
+outer loop
+vertex 150.0 25.0 25.0
+vertex 150.0 0.0 0.0
+vertex 150.0 0.0 25.0
+endloop
+endfacet
+facet normal -1.0 0.0 0.0
+outer loop
+vertex 150.0 0.0 0.0
+vertex 150.0 25.0 25.0
+vertex 150.0 25.0 12.5
+endloop
+endfacet
+facet normal -1.0 0.0 0.0
+outer loop
+vertex 150.0 0.0 0.0
+vertex 150.0 25.0 12.5
+vertex 150.0 75.0 0.0
+endloop
+endfacet
+facet normal -1.0 0.0 0.0
+outer loop
+vertex 150.0 75.0 0.0
+vertex 150.0 25.0 12.5
+vertex 150.0 62.5 12.5
+endloop
+endfacet
+facet normal -1.0 0.0 0.0
+outer loop
+vertex 150.0 75.0 0.0
+vertex 150.0 62.5 12.5
+vertex 150.0 75.0 25.0
+endloop
+endfacet
+facet normal 0.0 0.0 1.0
+outer loop
+vertex 175.0 25.0 12.5
+vertex 150.0 62.5 12.5
+vertex 150.0 25.0 12.5
+endloop
+endfacet
+facet normal 0.0 0.0 1.0
+outer loop
+vertex 150.0 62.5 12.5
+vertex 175.0 25.0 12.5
+vertex 175.0 62.5 12.5
+endloop
+endfacet
+facet normal 0.0 1.0 0.0
+outer loop
+vertex 150.0 25.0 25.0
+vertex 175.0 25.0 12.5
+vertex 150.0 25.0 12.5
+endloop
+endfacet
+facet normal 0.0 1.0 0.0
+outer loop
+vertex 175.0 25.0 12.5
+vertex 150.0 25.0 25.0
+vertex 175.0 25.0 25.0
+endloop
+endfacet
+facet normal -0.0 -1.0 -0.0
+outer loop
+vertex 175.0 62.5 25.0
+vertex 150.0 62.5 12.5
+vertex 175.0 62.5 12.5
+endloop
+endfacet
+facet normal -0.0 -1.0 -0.0
+outer loop
+vertex 150.0 62.5 12.5
+vertex 175.0 62.5 25.0
+vertex 150.0 62.5 25.0
+endloop
+endfacet
+facet normal 0.0 0.0 1.0
+outer loop
+vertex 175.0 62.5 25.0
+vertex 150.0 75.0 25.0
+vertex 150.0 62.5 25.0
+endloop
+endfacet
+facet normal 0.0 0.0 1.0
+outer loop
+vertex 150.0 75.0 25.0
+vertex 175.0 62.5 25.0
+vertex 175.0 75.0 25.0
+endloop
+endfacet
+endsolid 6 piece burr puzzle

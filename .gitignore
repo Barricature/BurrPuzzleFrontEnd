@@ -29,5 +29,4 @@ Thumbs.db
 Debug.txt
 
 # Large local sample geometry (do not commit by default)
-public/samples/6p_burr/*.stl
 public/sample/files/*.stl
